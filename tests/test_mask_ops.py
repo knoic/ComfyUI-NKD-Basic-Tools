@@ -48,6 +48,50 @@ def demo():
     shrunk = process(m, expand_px=-5)
     assert shrunk[0, 35, 50] == 1.0 and shrunk[0, 34, 50] == 0.0
 
+    # Margin shorthand keeps scalar behavior and gives each side its own amount.
+    assert mask_core.parse_expand("4 8") == (4, 8, 4, 8)
+    assert mask_core.parse_expand("4 8 2") == (4, 8, 2, 8)
+    assert mask_core.parse_expand("4 8 2 6") == (4, 8, 2, 6)
+    for value in (0, 4, -4, 37, -37):
+        reference = process(m, expand_px=value)
+        assert torch.equal(reference, process(m, expand_px=str(value)))
+        assert torch.equal(reference, process(m, expand_px=" ".join([str(value)] * 4)))
+    for invalid in ("", "1 2 3 4 5", "4px", "1.5", "auto", "4 nope"):
+        try:
+            process(m, expand_px=invalid)
+        except ValueError as error:
+            assert "1–4 integers" in str(error)
+        else:
+            raise AssertionError(invalid)
+    blob = torch.zeros(2, 100, 100)
+    blob[:, 30:70, 30:70] = 1
+    for margins, bounds in (("4 8 2 6", (26, 72, 24, 78)),
+                            ("-4 -8 -2 -6", (34, 68, 36, 62)),
+                            ("4 -2 0 -2", (26, 70, 32, 68)),
+                            ("0 0 5 0", (30, 75, 30, 70))):
+        expected = torch.zeros_like(blob)
+        top, bottom, left, right = bounds
+        expected[:, top:bottom, left:right] = 1
+        assert torch.equal(process(blob, expand_px=margins), expected), margins
+
+    # Full-window reference checks soft masks, borders and split pooling passes.
+    import torch.nn.functional as F
+    source = torch.rand(2, 1, 7, 9)
+    for margins in ((2, 3, 1, 4), (-2, -3, -1, -4),
+                    (3, -2, -1, 4), (37, 0, 2, -1)):
+        top, right, bottom, left = margins
+        expected = source
+        for sign in (1, -1):
+            l, r, u, d = ((max(0, right), max(0, left), max(0, bottom), max(0, top))
+                          if sign == 1 else
+                          (max(0, -left), max(0, -right), max(0, -top), max(0, -bottom)))
+            windows = F.pad(expected, (l, r, u, d), mode="replicate")
+            windows = windows.unfold(2, u + d + 1, 1).unfold(3, l + r + 1, 1)
+            expected = (windows.amax(dim=(-2, -1)) if sign == 1 else
+                        windows.amin(dim=(-2, -1)))
+        actual = process(source.squeeze(1), expand_px=" ".join(map(str, margins)))
+        assert torch.allclose(actual, expected.squeeze(1), atol=1e-7), margins
+
     # Blockify snaps to the grid: an off-grid edge lands on a multiple of 16.
     off = torch.zeros(1, 64, 64)
     off[0, :, 20:44] = 1.0
@@ -155,7 +199,7 @@ def demo():
     video = torch.rand(7, 13, 11)
     groups = torch.tensor([0, 0, 1, 1, 1, 2, 2])
     kwargs = dict(despeckle_px=1, temporal_expand_frames=1,
-                  temporal_smooth_frames=1, expand_px=2, blockify_px=4,
+                  temporal_smooth_frames=1, expand_px="2 -1 0 3", blockify_px=4,
                   blockify_threshold=0.25, time_groups=groups, feather_px=3)
     original_chunk_pixels = mask_core._CHUNK_PIXELS
     try:

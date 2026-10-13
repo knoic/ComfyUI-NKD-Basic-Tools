@@ -25,7 +25,14 @@ Everything sits in one panel, and anything left at 0 is skipped.
   keeps its exact outline, so fingers, hair and thin details don't get shaved off
   the way a normal cleanup pass shaves them.
 - **Fill Holes** and **Close Gaps** give you solid shapes and bridged cracks.
-- **Expand / Contract** and **Feather** are one signed value and one softness.
+- **Expand / Contract** accepts signed integer pixels or CSS margin shorthand:
+  `4` (all sides), `4 8` (vertical / horizontal), `4 8 2` (top / horizontal /
+  bottom), or `4 8 2 6` (top / right / bottom / left). Positive expands and
+  negative contracts; mixed signs expand first, then contract. `4 -2 0 -2`
+  expands the top by 4 and contracts left and right by 2. Units such as `px`
+  and `%` are not accepted. Existing numeric values and INT connections still work.
+  The same syntax is available in Mask Ops Lean.
+- **Feather** softens the edge.
 - **Blockify** snaps the mask to a grid of squares so it survives the trip into
   latent space without bleeding into the blocks next door. Connect your `vae` and
   it configures itself: the grid comes from that VAE, and on a video VAE the mask

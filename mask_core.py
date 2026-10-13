@@ -273,12 +273,62 @@ def close_gaps(x: torch.Tensor, radius: int) -> torch.Tensor:
     return erode(dilate(x, radius), radius)
 
 
-def expand(x: torch.Tensor, amount: int) -> torch.Tensor:
-    if amount > 0:
-        return dilate(x, amount)
-    if amount < 0:
-        return erode(x, -amount)
-    return x
+def parse_expand(amount: int | str) -> int | tuple[int, int, int, int]:
+    """Signed pixels, with CSS's 1–4 value shorthand in top/right/bottom/left order."""
+    if isinstance(amount, int):
+        return amount
+    try:
+        parts = amount.split()
+        values = [int(v) for v in parts]
+    except (AttributeError, ValueError):
+        raise ValueError("Expand / Contract expects 1–4 integers in pixels") from None
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        top, right = values
+        values = [top, right, top, right]
+    elif len(values) == 3:
+        top, right, bottom = values
+        values = [top, right, bottom, right]
+    elif len(values) != 4:
+        raise ValueError("Expand / Contract expects 1–4 integers in pixels")
+    return values[0] if len(set(values)) == 1 else tuple(values)
+
+
+def expand(x: torch.Tensor, amount: int | tuple[int, int, int, int]) -> torch.Tensor:
+    if isinstance(amount, int):
+        if amount > 0:
+            return dilate(x, amount)
+        if amount < 0:
+            return erode(x, -amount)
+        return x
+    top, right, bottom, left = amount
+
+    def run(t):
+        # Dilation reads toward the opposite side; erosion reads toward the
+        # contracted side. Positive directions run before negative directions.
+        for sign in (1, -1):
+            pads = ([max(0, right), max(0, left), max(0, bottom), max(0, top)]
+                    if sign == 1 else
+                    [max(0, -left), max(0, -right), max(0, -top), max(0, -bottom)])
+            if not any(pads):
+                continue
+            if sign == -1:
+                t = 1.0 - t
+            while any(pads):
+                l, r, u, d = [min(v, _MAX_STEP) for v in pads]
+                if l or r:
+                    t = F.max_pool2d(F.pad(t, (l, r, 0, 0), mode="replicate"),
+                                     (1, l + r + 1), stride=1)
+                if u or d:
+                    t = F.max_pool2d(F.pad(t, (0, 0, u, d), mode="replicate"),
+                                     (u + d + 1, 1), stride=1)
+                pads = [v - step for v, step in zip(pads, (l, r, u, d))]
+            if sign == -1:
+                t = 1.0 - t
+        return t
+
+    return _map_frames(run, x)
 
 
 def blockify(x: torch.Tensor, size: int, threshold: float) -> torch.Tensor:
@@ -573,7 +623,7 @@ def _process_streamed(mask: torch.Tensor, device: torch.device, *,
                       invert: bool, black_point: float, white_point: float,
                       despeckle_px: int, fill: bool, close_px: int,
                       temporal_expand_frames: int, temporal_smooth_frames: int,
-                      expand_px: int, blockify_px: int, blockify_threshold: float,
+                      expand_px: int | tuple[int, int, int, int], blockify_px: int, blockify_threshold: float,
                       time_groups: "torch.Tensor | None", feather_px: int,
                       edge_low: float, edge_high: float) -> torch.Tensor:
     src_device, src_dtype = mask.device, mask.dtype
@@ -620,7 +670,7 @@ def process(mask: torch.Tensor, *, invert: bool = False,
             black_point: float = 0.0, white_point: float = 1.0,
             despeckle_px: int = 0, fill: bool = False, close_px: int = 0,
             temporal_expand_frames: int = 0, temporal_smooth_frames: int = 0,
-            expand_px: int = 0, blockify_px: int = 0, blockify_threshold: float = 0.0,
+            expand_px: int | str = 0, blockify_px: int = 0, blockify_threshold: float = 0.0,
             time_groups: "torch.Tensor | None" = None,
             feather_px: int = 0,
             edge_low: float = 0.0, edge_high: float = 1.0) -> torch.Tensor:
@@ -633,6 +683,7 @@ def process(mask: torch.Tensor, *, invert: bool = False,
     range is the one thing after that, because it reads the softness the feather
     just produced.
     """
+    expand_px = parse_expand(expand_px)
     if mask.dim() == 2:
         mask = mask.unsqueeze(0)
     src_device, src_dtype = mask.device, mask.dtype

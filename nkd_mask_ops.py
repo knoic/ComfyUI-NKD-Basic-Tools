@@ -99,10 +99,14 @@ class NKDMaskOps(io.ComfyNode):
                              display_name="Smooth In Time",
                              tooltip="Video only. Average each frame's mask with this many "
                                      "frames either side to stop the edge from flickering."),
-                io.Int.Input("expand", default=0, min=-512, max=512,
-                             display_name="Expand / Contract",
-                             tooltip="Grow the mask outward by this many pixels, or shrink it "
-                                     "with a negative value."),
+                io.MultiType.Input(
+                    io.String.Input("expand", default="0", display_name="Expand / Contract",
+                                    tooltip="Signed pixels: one integer for all sides, or "
+                                            "CSS margin order (top right bottom left). "
+                                            "2 values = vertical horizontal; 3 = top horizontal bottom. "
+                                            "Positive grows, negative shrinks. Mixed signs grow first, "
+                                            "then shrink. Examples: 4; 4 8; 4 -2 0 -2."),
+                    types=[io.String, io.Int]),
                 io.Int.Input("blockify", default=0, min=0, max=256,
                              display_name="Blockify",
                              tooltip="Snap the mask to a grid of squares this many pixels wide, "
@@ -203,10 +207,14 @@ class NKDMaskOpsLean(io.ComfyNode):
                                  display_name="Fill Holes",
                                  tooltip="Fill gaps fully enclosed by the mask, so each area "
                                          "becomes a solid shape."),
-                io.Int.Input("expand", default=0, min=-512, max=512,
-                             display_name="Expand / Contract",
-                             tooltip="Grow the mask outward by this many pixels, or shrink it "
-                                     "with a negative value."),
+                io.MultiType.Input(
+                    io.String.Input("expand", default="0", display_name="Expand / Contract",
+                                    tooltip="Signed pixels: one integer for all sides, or "
+                                            "CSS margin order (top right bottom left). "
+                                            "2 values = vertical horizontal; 3 = top horizontal bottom. "
+                                            "Positive grows, negative shrinks. Mixed signs grow first, "
+                                            "then shrink. Examples: 4; 4 8; 4 -2 0 -2."),
+                    types=[io.String, io.Int]),
                 io.Int.Input("feather", default=0, min=0, max=256,
                              display_name="Feather",
                              tooltip="Soften the edge by this many pixels. Runs last, so "
